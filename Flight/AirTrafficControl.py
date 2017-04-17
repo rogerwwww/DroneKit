@@ -92,10 +92,8 @@ class Tower(object):
   TURN_RADIUS = 0.5 # Meters
   STANDARD_ANGLE_ADJUSTMENT = 1.0
   HOVER_DRIFT_TIME = 0.1
-  DRIFT_CORRECT_THRESHOLD = 0.05
-  ACCEL_NOISE_THRESHOLD = 0.09
-  MAX_DRIFT_COMPENSATION = 10.0
-  MAX_ANGLE_ALL_AXIS = 20.0
+  ACCEL_NOISE_THRESHOLD = 0.05
+  MAX_ANGLE_ALL_AXIS = 10.0
   BATTERY_FAILSAFE_VOLTAGE = 10.25
   FAILSAFES_SLEEP_TIME = 0.1
   STANDARD_SLEEP_TIME = 1
@@ -147,13 +145,8 @@ class Tower(object):
   def initialize_pids(self):
     self.velocity_x_pid_pos = PID(0.25, 0.01, 0.5, self.ACCEL_NOISE_THRESHOLD, Direction.reverse)
     self.velocity_y_pid_pos = PID(0.25, 0.01, 0.5, self.ACCEL_NOISE_THRESHOLD, Direction.reverse)
-    self.velocity_x_pid_pos.set_output_limits(0, 10)
-    self.velocity_y_pid_pos.set_output_limits(0, 10)
-    
-    self.velocity_x_pid_neg = PID(0.25, 0.01, 0.5, self.ACCEL_NOISE_THRESHOLD, Direction.direct)
-    self.velocity_y_pid_neg = PID(0.25, 0.01, 0.5, self.ACCEL_NOISE_THRESHOLD, Direction.direct)
-    self.velocity_x_pid_neg.set_output_limits(-10, 0)
-    self.velocity_y_pid_neg.set_output_limits(-10, 0)
+    self.velocity_x_pid_pos.set_output_limits(0, self.MAX_ANGLE_ALL_AXIS)
+    self.velocity_y_pid_pos.set_output_limits(0, self.MAX_ANGLE_ALL_AXIS)
 
   def shutdown(self):    
     """ 
@@ -266,32 +259,42 @@ class Tower(object):
     self.set_angle_thrust(StandardAttitudes.level, StandardThrusts.hover)
     self.STATE = VehicleStates.hover
     
-    while((-self.ACCEL_NOISE_THRESHOLD <= self.vehicle.velocity[0] <= self.ACCEL_NOISE_THRESHOLD) and (-self.ACCEL_NOISE_THRESHOLD <= self.vehicle.velocity[1] <= self.ACCEL_NOISE_THRESHOLD)):
-      adjust_attitude = deepcopy(StandardAttitudes.level)
-      if(self.vehicle.velocity[0] < 0):
-        pid_x = self.velocity_x_pid_neg.compute(self.vehicle.velocity[0])
-        if(pid_x[1]):
-          adjust_attitude.pitch_deg = pid_x[0]
-      elif(self.vehicle.velocity[0] > 0):
-        pid_x = self.velocity_x_pid_pos.compute(self.vehicle.velocity[0])
-        if(pid_x[1]):
-          adjust_attitude.pitch_deg = pid_x[0]
-      
-      if(self.vehicle.velocity[1] < 0):
-        pid_y = self.velocity_y_pid_neg.compute(self.vehicle.velocity[1])
-        if(pid_y[1]):
-          adjust_attitude.roll_deg = pid_y[1]
-      elif(self.vehicle.velocity[1] > 0):
-        pid_y = self.velocity_y_pid_pos.compute(self.vehicle.velocity[1])
-        if(pid_y[1]):
-          adjust_attitude.roll_deg = pid_y[1]
+    duration = 0
+    adjust_attitude = deepcopy(StandardAttitudes.level)
 
-      adjust_attitude.pitch = math.radians(adjust_attitude.pitch_deg)
-      adjust_attitude.roll = math.radians(adjust_attitude.roll_deg)
-      adjust_attitude.quaternion = adjust_attitude.get_quaternion()
+    while(duration > 0):
+      while((-self.ACCEL_NOISE_THRESHOLD <= self.vehicle.velocity[0] <= self.ACCEL_NOISE_THRESHOLD) and (-self.ACCEL_NOISE_THRESHOLD <= self.vehicle.velocity[1] <= self.ACCEL_NOISE_THRESHOLD)):
 
-      sleep(self.HOVER_DRIFT_TIME)
+        pid_x = self.velocity_x_pid.compute(self.vehicle.velocity[0])
+        pid_y = self.velocity_y_pid.compute(self.vehicle.velocity[1])
 
+        if(self.vehicle.velocity[0] < 0):
+          if(pid_x[1]):
+            adjust_attitude.pitch_deg = pid_x[0]
+        elif(self.vehicle.velocity[0] > 0):
+          if(pid_x[1]):
+            adjust_attitude.pitch_deg = pid_x[0] * -1
+        
+        if(self.vehicle.velocity[1] < 0):
+          if(pid_y[1]):
+            adjust_attitude.roll_deg = pid_y[0]
+        elif(self.vehicle.velocity[1] > 0):
+          if(pid_y[1]):
+            adjust_attitude.roll_deg = pid_y[0] * -1
+
+
+          adjust_attitude.yaw_deg = 0
+
+          adjust_attitude.pitch = math.radians(adjust_attitude.pitch_deg)
+          adjust_attitude.roll = math.radians(adjust_attitude.roll_deg)
+          adjust_attitude.yaw = math.radians(adjust_attitude.yaw_deg)
+          adjust_attitude.quaternion = adjust_attitude.get_quaternion()
+
+          self.set_angle_thrust(adjust_attitude, StandardThrusts.hover)
+
+          sleep(self.HOVER_DRIFT_TIME)
+      sleep(1)
+      duration-=1
 
 
   # def turnaway(self):
