@@ -90,10 +90,10 @@ class Tower(object):
   TURN_START_VELOCITY = 3
   TURN_RADIUS = 0.5 # Meters
   STANDARD_ANGLE_ADJUSTMENT = 1.0
-  MESSAGE_WAIT_TIME = 0.01
+  HOVER_DRIFT_TIME = 0.1
   ACCEL_NOISE_THRESHOLD = 0.05
-  MAX_ANGLE_ALL_AXIS = 15.0
-  BATTERY_FAILSAFE_VOLTAGE = 9.25
+  MAX_ANGLE_ALL_AXIS = 10.0
+  BATTERY_FAILSAFE_VOLTAGE = 10.25
   FAILSAFES_SLEEP_TIME = 0.1
   PID_STEP_SLEEP_TIME = 0.1
   STANDARD_SLEEP_TIME = 1
@@ -138,6 +138,13 @@ class Tower(object):
       self.switch_control()
       
       print("\nSuccessfully connected to vehicle.")
+
+
+  def initialize_pids(self):
+    self.velocity_x_pid_pos = PID(0.25, 0.01, 0.5, self.ACCEL_NOISE_THRESHOLD, Direction.reverse)
+    self.velocity_y_pid_pos = PID(0.25, 0.01, 0.5, self.ACCEL_NOISE_THRESHOLD, Direction.reverse)
+    self.velocity_x_pid_pos.set_output_limits(0, self.MAX_ANGLE_ALL_AXIS)
+    self.velocity_y_pid_pos.set_output_limits(0, self.MAX_ANGLE_ALL_AXIS)
 
   def shutdown(self):    
     """ 
@@ -250,75 +257,63 @@ class Tower(object):
     adjust_attitude = deepcopy(StandardAttitudes.level)
     self.STATE = VehicleStates.hover
 
-    while(datetime.now() < end_manuever):
-      sleep(self.PID_STEP_SLEEP_TIME)
+    duration = 0
+    adjust_attitude = deepcopy(StandardAttitudes.level)
 
-      x_velocity = self.vehicle.velocity[0]
-      y_velocity = self.vehicle.velocity[1]
+    while(duration > 0):
+      while((-self.ACCEL_NOISE_THRESHOLD <= self.vehicle.velocity[0] <= self.ACCEL_NOISE_THRESHOLD) and (-self.ACCEL_NOISE_THRESHOLD <= self.vehicle.velocity[1] <= self.ACCEL_NOISE_THRESHOLD)):
+
+        pid_x = self.velocity_x_pid.compute(self.vehicle.velocity[0])
+        pid_y = self.velocity_y_pid.compute(self.vehicle.velocity[1])
+
+        if(self.vehicle.velocity[0] < 0):
+          if(pid_x[1]):
+            adjust_attitude.pitch_deg = pid_x[0]
+        elif(self.vehicle.velocity[0] > 0):
+          if(pid_x[1]):
+            adjust_attitude.pitch_deg = pid_x[0] * -1
+        
+        if(self.vehicle.velocity[1] < 0):
+          if(pid_y[1]):
+            adjust_attitude.roll_deg = pid_y[0]
+        elif(self.vehicle.velocity[1] > 0):
+          if(pid_y[1]):
+            adjust_attitude.roll_deg = pid_y[0] * -1
 
 
-      if(not (-self.ACCEL_NOISE_THRESHOLD <= x_velocity <= self.ACCEL_NOISE_THRESHOLD)
-            and not(-self.ACCEL_NOISE_THRESHOLD <= y_velocity <= self.ACCEL_NOISE_THRESHOLD)):
+          adjust_attitude.yaw_deg = 0
 
-        x_velocity = self.vehicle.velocity[0]
-        y_velocity = self.vehicle.velocity[1]
+          adjust_attitude.pitch = math.radians(adjust_attitude.pitch_deg)
+          adjust_attitude.roll = math.radians(adjust_attitude.roll_deg)
+          adjust_attitude.yaw = math.radians(adjust_attitude.yaw_deg)
+          adjust_attitude.quaternion = adjust_attitude.get_quaternion()
 
-        if(y_velocity > 0):
+          self.set_angle_thrust(adjust_attitude, StandardThrusts.hover)
 
-          adjust_attitude.roll_deg -= self.STANDARD_ANGLE_ADJUSTMENT
+          sleep(self.HOVER_DRIFT_TIME)
+      sleep(1)
+      duration-=1
 
-          if adjust_attitude.roll_deg < -self.MAX_ANGLE_ALL_AXIS:
-            adjust_attitude.roll_deg = -self.MAX_ANGLE_ALL_AXIS
 
-          adjust_attitude = DroneAttitude(adjust_attitude.roll_deg, 
-                                          adjust_attitude.pitch_deg, 
-                                          0)
-          print("\Drifted right, correcting left.")
-
-        elif(y_velocity < 0):
-
-          adjust_attitude.roll_deg += self.STANDARD_ANGLE_ADJUSTMENT
-
-          if adjust_attitude.roll_deg > self.MAX_ANGLE_ALL_AXIS:
-            adjust_attitude.roll_deg = self.MAX_ANGLE_ALL_AXIS
-
-          adjust_attitude = DroneAttitude(adjust_attitude.roll_deg, 
-                                          adjust_attitude.pitch_deg, 
-                                          0)
-
-          print("\Drifted left, correcting right.")
-
-        if(x_velocity > 0):
-
-          adjust_attitude.pitch_deg += self.STANDARD_ANGLE_ADJUSTMENT
-
-          if adjust_attitude.pitch_deg > self.MAX_ANGLE_ALL_AXIS:
-            adjust_attitude.pitch_deg = self.MAX_ANGLE_ALL_AXIS
-
-          adjust_attitude = DroneAttitude(adjust_attitude.roll_deg, 
-                                          adjust_attitude.pitch_deg, 
-                                          0)
-
-          print("\Drifted forward, correcting backwards.")
-
-        elif(x_velocity < 0):
-
-          adjust_attitude.pitch_deg -= self.STANDARD_ANGLE_ADJUSTMENT
-
-          if adjust_attitude.pitch_deg < -self.MAX_ANGLE_ALL_AXIS:
-            adjust_attitude.pitch_deg = -self.MAX_ANGLE_ALL_AXIS
-
-          adjust_attitude = DroneAttitude(adjust_attitude.roll_deg, 
-                                          adjust_attitude.pitch_deg, 
-                                          0)
-
-          print("\Drifted backwards, correcting forward.")
-
-        self.set_angle_thrust(adjust_attitude, StandardThrusts.hover)
-
-        print("\nVehicle Attitude: " + " Pitch: " + str(math.degrees(self.vehicle.attitude.pitch)) + " Roll: " + str(math.degrees(self.vehicle.attitude.roll)) + " Yaw: " + str(math.degrees(self.vehicle.attitude.pitch)))
-        print("\nX m/s: " + str(x_velocity) + " Y m/s: " + str(y_velocity))
-        print("\nAttitude Adjustments: " + "Roll: " + str(adjust_attitude.roll_deg) + " Pitch: " + str(adjust_attitude.pitch_deg) + " Yaw: " + str(adjust_attitude.yaw_deg))
+  # def turnaway(self):
+  #   adjust_attitude = deepcopy(StandardAttitudes.level)
+  #   sonar = Sonar.Sonar(2,3, "Main")
+  #   if (sonar.getDistance < sonar.SAFE_DISTANCE and sonar.getName == "Left"):
+  #     while (sonar.getDistance < sonar.SAFE_DISTANCE):
+  #       adjust_attitude = DroneAttitude(self.STAN, adjust_attitude.pitch_deg, adjust_attitude.yaw_deg)
+  #       self.set_angle_thrust(adjust_attitude, StandardThrusts.hover)
+  #   if (sonar.getDistance < sonar.SAFE_DISTANCE and sonar.getName == "Right"):
+  #     while (sonar.getDistance < sonar.SAFE_DISTANCE):
+  #       adjust_attitude = DroneAttitude(-self.HOVER_ADJUST_DEG, adjust_attitude.pitch_deg, adjust_attitude.yaw_deg)
+  #       self.set_angle_thrust(adjust_attitude, StandardThrusts.hover)
+  #   if (sonar.getDistance < sonar.SAFE_DISTANCE and sonar.getName == "Front"):
+  #     while (sonar.getDistance < sonar.SAFE_DISTANCE):
+  #       adjust_attitude = DroneAttitude(adjust_attitude.roll_deg, self.HOVER_ADJUST_DEG, adjust_attitude.yaw_deg)
+  #       self.set_angle_thrust(adjust_attitude, StandardThrusts.hover)
+  #   if (sonar.getDistance < sonar.SAFE_DISTANCE and sonar.getName == "Back"):
+  #     while (sonar.getDistance < sonar.SAFE_DISTANCE):
+  #       adjust_attitude = DroneAttitude(adjust_attitude.roll_deg, -self.HOVER_ADJUST_DEG, adjust_attitude.yaw_deg)
+  #       self.set_angle_thrust(adjust_attitude, StandardThrusts.hover)
 
   def takeoff(self, target_altitude):
 
