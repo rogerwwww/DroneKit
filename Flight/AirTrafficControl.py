@@ -96,6 +96,7 @@ class Tower(object):
   BATTERY_FAILSAFE_VOLTAGE = 9.25
   FAILSAFES_SLEEP_TIME = 0.1
   STANDARD_SLEEP_TIME = 1
+  BAUDRATE = 115200
 
   def __init__(self):
     self.start_time = 0
@@ -121,7 +122,8 @@ class Tower(object):
         sys.stdout = self.flight_log
 
       print("\nConnecting via USB to PixHawk...")
-      self.vehicle = dronekit.connect(self.USB, wait_ready=True)
+	  #Add baud_rate parameter
+      self.vehicle = dronekit.connect(self.USB, baud = self.BAUDRATE, wait_ready=True)
 
       if not self.vehicle:
         print("\nUnable to connect to vehicle.")
